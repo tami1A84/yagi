@@ -44,6 +44,8 @@ func initReadline(prompt, configDir string) error {
 			readline.PcItem("/agent"),
 			readline.PcItem("/plan"),
 			readline.PcItem("/mode"),
+			readline.PcItem("/login"),
+			readline.PcItem("/logout"),
 		),
 	}
 	if configDir != "" {
