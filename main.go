@@ -226,6 +226,9 @@ func loadConfigurations() string {
 	if err := loadMemory(configDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to load memory: %v\n", err)
 	}
+	if err := loadAuth(configDir); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to load auth: %v\n", err)
+	}
 	if err := loadPlugins(filepath.Join(configDir, "tools"), configDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to load plugins: %v\n", err)
 	}
@@ -238,7 +241,7 @@ func loadConfigurations() string {
 	return configDir
 }
 
-func setupProvider(modelFlag, apiKeyFlag string) *openai.Client {
+func setupProvider(modelFlag, apiKeyFlag, configDir string) *openai.Client {
 	providerName, modelName, ok := strings.Cut(modelFlag, "/")
 	if !ok {
 		fmt.Fprintf(os.Stderr, "Invalid model format: %s\nUse provider/model format (e.g. google/gemini-2.5-pro)\nRun with -list to see available providers.\n", modelFlag)
@@ -252,11 +255,18 @@ func setupProvider(modelFlag, apiKeyFlag string) *openai.Client {
 
 	model = modelName
 
-	apiKey := apiKeyFlag
-	if apiKey == "" && selectedProvider.EnvKey != "" {
-		apiKey = os.Getenv(selectedProvider.EnvKey)
+	apiKey := resolveAPIKeyWithAuth(configDir, selectedProvider, apiKeyFlag)
+	if apiKey == "" {
+		method := promptAuthMethod(selectedProvider.Name)
+		if method == "oauth" {
+			if err := runLogin(configDir, selectedProvider.Name); err != nil {
+				fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
+				os.Exit(1)
+			}
+			apiKey = resolveAPIKeyWithAuth(configDir, selectedProvider, "")
+		}
 		if apiKey == "" {
-			fmt.Fprintf(os.Stderr, "%s environment variable or -key flag is required\n", selectedProvider.EnvKey)
+			fmt.Fprintf(os.Stderr, "%s environment variable, -key flag, or /login is required\n", selectedProvider.EnvKey)
 			os.Exit(1)
 		}
 	}
@@ -519,6 +529,8 @@ func handleSlashCommand(input string, client **openai.Client, configDir string, 
 		fmt.Println("  /mode           - Show current mode settings")
 		fmt.Println("  /edit           - Open $EDITOR to compose a message")
 		fmt.Println("  /clear          - Clear conversation history")
+		fmt.Println("  /login [provider] - Authenticate via browser OAuth")
+		fmt.Println("  /logout [provider]- Clear stored OAuth credentials")
 		fmt.Println("  /revoke [name]  - Revoke plugin approval (use 'all' to revoke all)")
 		fmt.Println("  /exit           - Exit yagi")
 		fmt.Println("  /help           - Show this help")
@@ -684,6 +696,34 @@ func handleSlashCommand(input string, client **openai.Client, configDir string, 
 		} else {
 			fmt.Println("  Planning mode:   OFF")
 		}
+	case "/login":
+		provName := selectedProvider.Name
+		if args != "" {
+			provName = args
+		}
+		if err := runLogin(configDir, provName); err != nil {
+			fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
+			return
+		}
+		apiKey := resolveAPIKeyWithAuth(configDir, selectedProvider, "")
+		if apiKey != "" {
+			config := openai.DefaultConfig(apiKey)
+			config.BaseURL = selectedProvider.APIURL
+			newClient := openai.NewClientWithConfig(config)
+			*client = newClient
+			eng.SetClient(newClient)
+		}
+		fmt.Printf("Successfully logged in to %s via OAuth.\n", provName)
+	case "/logout":
+		provName := selectedProvider.Name
+		if args != "" {
+			provName = args
+		}
+		if err := runLogout(configDir, provName); err != nil {
+			fmt.Fprintf(os.Stderr, "Logout failed: %v\n", err)
+			return
+		}
+		fmt.Printf("Logged out from %s. Use /login or set %s to authenticate.\n", provName, selectedProvider.EnvKey)
 	case "/edit":
 		text, err := openEditor(args)
 		if err != nil {
@@ -733,7 +773,7 @@ func main() {
 		return
 	}
 
-	client := setupProvider(f.modelFlag, f.apiKeyFlag)
+	client := setupProvider(f.modelFlag, f.apiKeyFlag, configDir)
 
 	if f.stdioMode {
 		if err := runSTDIOMode(); err != nil {

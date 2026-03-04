@@ -9,9 +9,10 @@ import (
 )
 
 type Provider struct {
-	Name   string `json:"name"`
-	APIURL string `json:"apiurl"`
-	EnvKey string `json:"envKey,omitempty"`
+	Name     string `json:"name"`
+	APIURL   string `json:"apiurl"`
+	EnvKey   string `json:"envKey,omitempty"`
+	OAuthRef string `json:"oauthRef,omitempty"`
 }
 
 var DefaultProviders = []Provider{
@@ -26,9 +27,10 @@ var DefaultProviders = []Provider{
 		EnvKey: "GEMINI_API_KEY",
 	},
 	{
-		Name:   "anthropic",
-		APIURL: "https://api.anthropic.com/v1",
-		EnvKey: "ANTHROPIC_API_KEY",
+		Name:     "anthropic",
+		APIURL:   "https://api.anthropic.com/v1",
+		EnvKey:   "ANTHROPIC_API_KEY",
+		OAuthRef: "anthropic",
 	},
 	{
 		Name:   "deepseek",
